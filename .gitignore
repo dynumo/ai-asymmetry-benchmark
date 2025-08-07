@@ -1,0 +1,14 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment / secrets
+.env
+
+# Run results (optional - keep example only)
+results/*
+!results/example_model/
+
+# Editor files
+.vscode/
+.idea/
