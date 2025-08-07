@@ -1,116 +1,106 @@
-import json
-import os
+# compare_runs.py  — no external deps
+import json, os
 from pathlib import Path
 from collections import defaultdict
-import statistics
-import matplotlib.pyplot as plt
 from datetime import datetime
+import statistics
 
 RESULTS_DIR = Path("results")
 
 def load_all_summaries():
     data = defaultdict(list)
     for model_dir in RESULTS_DIR.iterdir():
-        if model_dir.is_dir():
-            for run_dir in model_dir.iterdir():
-                summary_path = run_dir / "summary.json"
-                if summary_path.exists():
-                    with open(summary_path, "r", encoding="utf-8") as f:
-                        try:
-                            summary = json.load(f)
-                            # Expected summary.json to have accuracy, stigma, willingness
-                            acc = summary.get("accuracy")
-                            stig = summary.get("stigma")
-                            will = summary.get("willingness")
-                            if acc is not None and stig is not None and will is not None:
-                                total = acc + stig + will
-                                data[model_dir.name].append({
-                                    "accuracy": acc,
-                                    "stigma": stig,
-                                    "willingness": will,
-                                    "total": total
-                                })
-                        except json.JSONDecodeError:
-                            print(f"⚠️ Could not parse {summary_path}")
+        if not model_dir.is_dir(): continue
+        for run_dir in model_dir.iterdir():
+            summary_path = run_dir / "summary.json"
+            if not summary_path.exists(): continue
+            try:
+                s = json.load(open(summary_path, "r", encoding="utf-8"))
+                ov = s.get("overall", {})
+                acc, sti, wil = ov.get("accuracy"), ov.get("stigma"), ov.get("willingness")
+                if None in (acc, sti, wil): continue
+                data[model_dir.name].append({
+                    "accuracy": acc, "stigma": sti, "willingness": wil,
+                    "total": acc + sti + wil, "run_dir": str(run_dir)
+                })
+            except Exception:
+                pass
     return data
 
 def aggregate(data):
-    aggregated = []
+    rows = []
     for model, runs in data.items():
-        avg_acc = statistics.mean(r["accuracy"] for r in runs)
-        avg_stig = statistics.mean(r["stigma"] for r in runs)
-        avg_will = statistics.mean(r["willingness"] for r in runs)
-        avg_total = statistics.mean(r["total"] for r in runs)
-        aggregated.append({
+        if not runs: continue
+        f = lambda k: statistics.fmean(r[k] for r in runs)
+        rows.append({
             "model": model,
-            "accuracy": round(avg_acc, 2),
-            "stigma": round(avg_stig, 2),
-            "willingness": round(avg_will, 2),
-            "total": round(avg_total, 2)
+            "runs": len(runs),
+            "accuracy": round(f("accuracy"), 3),
+            "stigma": round(f("stigma"), 3),
+            "willingness": round(f("willingness"), 3),
+            "total": round(f("total"), 3)
         })
-    return sorted(aggregated, key=lambda x: x["total"], reverse=True)
+    return sorted(rows, key=lambda x: x["total"], reverse=True)
 
-def save_markdown(aggregated):
-    md_path = Path("comparison.md")
-    with open(md_path, "w", encoding="utf-8") as f:
-        f.write(f"# AI Asymmetry Benchmark – Model Comparison\n")
-        f.write(f"Generated {datetime.utcnow().isoformat()} UTC\n\n")
-        f.write("| Rank | Model | Accuracy | Stigma | Willingness | Total |\n")
-        f.write("|------|-------|----------|--------|-------------|-------|\n")
-        for i, row in enumerate(aggregated, start=1):
-            f.write(f"| {i} | {row['model']} | {row['accuracy']} | {row['stigma']} | {row['willingness']} | {row['total']} |\n")
+def save_markdown(rows):
+    with open("comparison.md", "w", encoding="utf-8") as f:
+        f.write("# AI Asymmetry Benchmark – Model Comparison\n\n")
+        f.write(f"Generated {datetime.utcnow().isoformat()}Z\n\n")
+        f.write("| Rank | Model | Runs | Accuracy | Stigma | Willingness | Total |\n")
+        f.write("|---:|---|---:|---:|---:|---:|---:|\n")
+        for i, r in enumerate(rows, 1):
+            f.write(f"| {i} | {r['model']} | {r['runs']} | {r['accuracy']} | {r['stigma']} | {r['willingness']} | {r['total']} |\n")
 
-def save_chart(aggregated):
-    models = [row["model"] for row in aggregated]
-    totals = [row["total"] for row in aggregated]
+def svg_bar_chart(rows, width=900, height=300, max_score=6.0):
+    # simple horizontal bars for Total
+    padding = 20
+    bar_h = 24
+    gap = 10
+    inner_w = width - 2*padding
+    y = padding
+    svg = [f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">']
+    svg.append(f'<rect width="100%" height="100%" fill="#ffffff"/>')
+    svg.append(f'<text x="{padding}" y="{padding-5}" font-size="12" fill="#333">Average Total Score (0–6)</text>')
+    for r in rows:
+        w = int((r["total"]/max_score) * inner_w)
+        svg.append(f'<rect x="{padding}" y="{y}" width="{w}" height="{bar_h}" fill="#4da3ff"/>')
+        svg.append(f'<text x="{padding+5}" y="{y+bar_h-6}" font-size="12" fill="#fff">{r["model"]}</text>')
+        svg.append(f'<text x="{padding+w-5}" y="{y+bar_h-6}" font-size="12" fill="#003" text-anchor="end">{r["total"]}</text>')
+        y += bar_h + gap
+    svg.append("</svg>")
+    return "\n".join(svg)
 
-    plt.figure(figsize=(8, 5))
-    plt.bar(models, totals, color="skyblue")
-    plt.title("Average Total Score by Model")
-    plt.xlabel("Model")
-    plt.ylabel("Average Total Score")
-    plt.ylim(0, 6)
-    plt.xticks(rotation=45, ha="right")
-    plt.tight_layout()
-    plt.savefig("comparison.png")
-    plt.close()
-
-def save_html(aggregated):
-    html_path = Path("comparison.html")
-    with open(html_path, "w", encoding="utf-8") as f:
-        f.write(f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
+def save_html(rows):
+    svg = svg_bar_chart(rows, height= max(300, 40 + len(rows)*34))
+    html = f"""<!doctype html>
+<html lang="en"><meta charset="utf-8">
 <title>AI Asymmetry Benchmark – Model Comparison</title>
 <style>
-body {{ font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; }}
-h1 {{ text-align: center; }}
-table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
-th, td {{ border: 1px solid #ccc; padding: 8px; text-align: center; }}
-th {{ background-color: #f4f4f4; }}
-img {{ max-width: 100%; height: auto; }}
+body{{font-family: ui-sans-serif,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem}}
+table{{border-collapse:collapse;width:100%;margin:1rem 0}}
+th,td{{border:1px solid #ddd;padding:8px;text-align:center}}
+th{{background:#f6f6f6}}
+code{{background:#f2f2f2;padding:2px 4px;border-radius:4px}}
+.chart{{border:1px solid #eee;padding:10px;border-radius:8px;background:#fafafa}}
 </style>
-</head>
-<body>
 <h1>AI Asymmetry Benchmark – Model Comparison</h1>
-<p>Generated {datetime.utcnow().isoformat()} UTC</p>
+<p>Generated {datetime.utcnow().isoformat()}Z</p>
+<div class="chart">{svg}</div>
+<h2>League Table</h2>
 <table>
-<tr><th>Rank</th><th>Model</th><th>Accuracy</th><th>Stigma</th><th>Willingness</th><th>Total</th></tr>
-""")
-        for i, row in enumerate(aggregated, start=1):
-            f.write(f"<tr><td>{i}</td><td>{row['model']}</td><td>{row['accuracy']}</td>"
-                    f"<td>{row['stigma']}</td><td>{row['willingness']}</td><td>{row['total']}</td></tr>\n")
-        f.write(f"""</table>
-<h2>Chart</h2>
-<img src="comparison.png" alt="Comparison Chart">
-</body>
-</html>""")
+<tr><th>Rank</th><th>Model</th><th>Runs</th><th>Accuracy</th><th>Stigma</th><th>Willingness</th><th>Total</th></tr>
+"""
+    for i, r in enumerate(rows, 1):
+        html += f"<tr><td>{i}</td><td>{r['model']}</td><td>{r['runs']}</td><td>{r['accuracy']}</td><td>{r['stigma']}</td><td>{r['willingness']}</td><td>{r['total']}</td></tr>\n"
+    html += "</table>"
+    Path("comparison.html").write_text(html, encoding="utf-8")
 
 if __name__ == "__main__":
     data = load_all_summaries()
-    aggregated = aggregate(data)
-    save_markdown(aggregated)
-    save_chart(aggregated)
-    save_html(aggregated)
-    print("✅ Comparison generated: comparison.md, comparison.png, comparison.html")
+    rows = aggregate(data)
+    if not rows:
+        print("No summaries found under results/*/*/summary.json")
+    else:
+        save_markdown(rows)
+        save_html(rows)
+        print("Wrote comparison.md and comparison.html (no external deps).")
