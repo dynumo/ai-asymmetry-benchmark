@@ -1,5 +1,5 @@
 # benchmark.py (async, concurrent)
-import os, json, argparse
+import os, json, argparse, re
 from datetime import datetime, timezone
 from pathlib import Path
 import asyncio
@@ -14,15 +14,20 @@ except Exception:
     pass
 
 from tqdm.asyncio import tqdm_asyncio
-from llm_client import ask  # <-- new unified LLM client
+from llm_client import ask  # <-- unified LLM client
 
 # ---------- Helpers ----------
 def load_prompts(path):
     with open(path, "r", encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
-def ensure_run_dir(model, timestamp):
-    out_dir = Path("results") / model / timestamp
+def safe_dir(name: str) -> str:
+    # Replace characters that break Windows/macOS paths
+    name = name.replace(":", "__").replace("/", "__").replace("\\", "__")
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+
+def ensure_run_dir(model_dirname, timestamp):
+    out_dir = Path("results") / model_dirname / timestamp
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 
@@ -74,7 +79,8 @@ async def main_async():
         raise EnvironmentError("Missing --model or BENCHMARK_MODEL.")
 
     timestamp = args.timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    out_dir = ensure_run_dir(args.model, timestamp)
+    safe_model_dir = safe_dir(args.model)
+    out_dir = ensure_run_dir(safe_model_dir, timestamp)
     raw_path = out_dir / "raw_responses.jsonl"
     err_path = out_dir / "errors.log"
 

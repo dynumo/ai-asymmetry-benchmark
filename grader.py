@@ -1,5 +1,5 @@
 # grader.py (async concurrent, multi-provider)
-import os, json, argparse, asyncio
+import os, json, argparse, asyncio, re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any
@@ -18,6 +18,10 @@ from llm_client import ask  # unified model call
 def load_rubric(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+def safe_dir(name: str) -> str:
+    name = name.replace(":", "__").replace("/", "__").replace("\\", "__")
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name)
 
 def already_processed_ids(out_file):
     ids = set()
@@ -82,9 +86,10 @@ async def main_async():
 
     RUBRIC = load_rubric(args.rubric)
 
-    raw_path = Path(args.run_dir) / "raw_responses.jsonl"
-    graded_path = Path(args.run_dir) / "graded_responses.jsonl"
-    err_path = Path(args.run_dir) / "grader_errors.log"
+    run_dir_path = Path(safe_dir(str(args.run_dir)))
+    raw_path = run_dir_path / "raw_responses.jsonl"
+    graded_path = run_dir_path / "graded_responses.jsonl"
+    err_path = run_dir_path / "grader_errors.log"
 
     with open(raw_path, "r", encoding="utf-8") as f:
         raw = [json.loads(line) for line in f]
