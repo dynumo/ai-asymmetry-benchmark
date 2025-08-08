@@ -1,18 +1,20 @@
-# benchmark.py
-import os, json, time, argparse, glob
-from datetime import datetime
+# benchmark.py (async, concurrent)
+import os, json, argparse
+from datetime import datetime, timezone
 from pathlib import Path
+import asyncio
+from typing import Dict, Any
 
-# Optional .env loading (doesn't fail if python-dotenv is missing)
+# Optional .env loading
 try:
-    from dotenv import load_dotenv  # type: ignore
+    from dotenv import load_dotenv
     if os.path.exists(".env"):
         load_dotenv()
 except Exception:
     pass
 
-from openai import OpenAI
-from tqdm import tqdm
+from tqdm.asyncio import tqdm_asyncio
+from llm_client import ask  # <-- new unified LLM client
 
 # ---------- Helpers ----------
 def load_prompts(path):
@@ -34,51 +36,43 @@ def already_processed_ids(out_file):
                     if "id" in obj:
                         ids.add(obj["id"])
                 except Exception:
-                    # skip malformed lines
                     pass
     return ids
 
-def log_error(err_path, item_id, msg, meta=None):
-    rec = {"id": item_id, "error": str(msg), "meta": meta or {}, "ts": datetime.utcnow().isoformat() + "Z"}
+def log_error_sync(err_path, item_id, msg, meta=None):
+    rec = {
+        "id": item_id,
+        "error": str(msg),
+        "meta": meta or {},
+        "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
     with open(err_path, "a", encoding="utf-8") as ef:
         ef.write(json.dumps(rec) + "\n")
 
-def call_model(client, model, prompt_text, max_retries=3):
+async def call_model_sync_in_thread(model: str, prompt_text: str, max_retries: int = 3) -> str:
     last_exc = None
     for attempt in range(1, max_retries + 1):
         try:
-            # No temperature to avoid 400s on models that don't support it
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt_text}],
-            )
-            return resp.choices[0].message.content.strip()
+            return await asyncio.to_thread(ask, model, prompt_text)
         except Exception as e:
             last_exc = e
-            # crude heuristic for transient errors; backoff
-            time.sleep(min(2 ** attempt, 8))
+            await asyncio.sleep(min(2 ** attempt, 8))
     raise last_exc
 
 # ---------- Main ----------
-def main():
-    ap = argparse.ArgumentParser(description="Run benchmark prompts against a model with resume, retries, and progress.")
+async def main_async():
+    ap = argparse.ArgumentParser(description="Run benchmark prompts with concurrency, resume, and retries.")
     ap.add_argument("--model", default=os.getenv("BENCHMARK_MODEL", "").strip(), help="Model name (e.g. gpt-5)")
     ap.add_argument("--prompts", default="data/prompts.jsonl", help="Path to prompts.jsonl")
     ap.add_argument("--timestamp", help="Run folder name; if omitted, a new timestamp is created")
-    ap.add_argument("--delay", type=float, default=0.2, help="Delay between requests in seconds (default 0.2)")
     ap.add_argument("--max", type=int, help="Limit number of prompts (for smoke tests)")
     ap.add_argument("--fail-fast", action="store_true", help="Stop on first error instead of logging and continuing")
+    ap.add_argument("--concurrency", type=int, default=10, help="Max in-flight requests (default 10)")
     args = ap.parse_args()
 
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise EnvironmentError("Missing OPENAI_API_KEY. Set it in your environment or .env file.")
     if not args.model:
         raise EnvironmentError("Missing --model or BENCHMARK_MODEL.")
 
-    client = OpenAI(api_key=api_key)
-
-    # Decide timestamp / run directory (resume if timestamp provided)
     timestamp = args.timestamp or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     out_dir = ensure_run_dir(args.model, timestamp)
     raw_path = out_dir / "raw_responses.jsonl"
@@ -93,40 +87,50 @@ def main():
 
     print(f"[INFO] Model={args.model}  Run={out_dir}")
     print(f"[INFO] Prompts total={len(prompts)}  Already done={len(done_ids)}  Remaining={len(to_run)}")
+    if not to_run:
+        print("[DONE] Nothing to do.")
+        return
 
-    # Append mode so we can resume safely
-    with open(raw_path, "a", encoding="utf-8") as out:
-        for p in tqdm(to_run, desc="Benchmarking", unit="item"):
-            pid = p.get("id")
-            try:
-                answer = call_model(client, args.model, p["text"])
-                rec = {
-                    "id": pid,
-                    "domain": p.get("domain"),
-                    "prompt": p.get("text"),
-                    "response": answer
-                }
-                out.write(json.dumps(rec) + "\n")
-                out.flush()
-            except Exception as e:
-                # Log error and either continue or fail fast
-                log_error(err_path, pid, e, {"model": args.model})
-                # Also write an error record to raw output so downstream steps can see the failure
-                rec = {
-                    "id": pid,
-                    "domain": p.get("domain"),
-                    "prompt": p.get("text"),
-                    "response": f"[ERROR] {e}"
-                }
-                out.write(json.dumps(rec) + "\n")
-                out.flush()
-                if args.fail_fast:
-                    raise
-            time.sleep(max(args.delay, 0.0))
+    write_lock = asyncio.Lock()
+    out_f = open(raw_path, "a", encoding="utf-8")
+    sem = asyncio.Semaphore(max(1, args.concurrency))
+
+    async def worker(p: Dict[str, Any]):
+        pid = p.get("id")
+        try:
+            async with sem:
+                answer = await call_model_sync_in_thread(args.model, p["text"])
+            rec = {
+                "id": pid,
+                "domain": p.get("domain"),
+                "prompt": p.get("text"),
+                "response": answer,
+            }
+            async with write_lock:
+                out_f.write(json.dumps(rec) + "\n")
+                out_f.flush()
+        except Exception as e:
+            log_error_sync(err_path, pid, e, {"model": args.model})
+            err_rec = {
+                "id": pid,
+                "domain": p.get("domain"),
+                "prompt": p.get("text"),
+                "response": f"[ERROR] {e}",
+            }
+            async with write_lock:
+                out_f.write(json.dumps(err_rec) + "\n")
+                out_f.flush()
+            if args.fail_fast:
+                raise
+
+    try:
+        await tqdm_asyncio.gather(*(worker(p) for p in to_run), desc="Benchmarking", unit="item")
+    finally:
+        out_f.close()
 
     print(f"[DONE] Wrote raw responses to {raw_path}")
     if Path(err_path).exists():
         print(f"[NOTE] Errors were logged to {err_path}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main_async())

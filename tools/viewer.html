@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Graded Responses Viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --bg:#f5f5f5; --fg:#111; --card:#fff; --muted:#666; --border:#ddd; --accent:#0a84ff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#121212; --fg:#eee; --card:#1e1e1e; --muted:#aaa; --border:#444; --accent:#4da3ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+  header, footer { padding:10px 16px; border-bottom:1px solid var(--border); }
+  footer { border-top:1px solid var(--border); border-bottom:none; font-size:12px; color:var(--muted); }
+  main { padding:16px; max-width:1100px; margin:0 auto; }
+  .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .btn { padding:6px 10px; border:1px solid var(--border); border-radius:8px; background:var(--card); color:var(--fg); cursor:pointer; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .pill { padding:4px 8px; border-radius:999px; border:1px solid var(--border); background:var(--card); }
+  .row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
+  .box { border:1px solid var(--border); border-radius:10px; padding:12px; background:var(--card); }
+  .meta { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:8px; font-size:14px; }
+  .k { font-weight:600; color:var(--muted); }
+  pre { margin:0; white-space:pre-wrap; word-wrap:break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  .muted { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="controls">
+    <button id="prev" class="btn" title="←">← Prev</button>
+    <button id="next" class="btn" title="→">Next →</button>
+    <span id="pos" class="pill">0 / 0</span>
+    <span id="status" class="muted"></span>
+  </div>
+  <div class="controls" style="margin-top:6px;">
+    <button id="openFile" class="btn">Load graded_responses.jsonl…</button>
+    <input type="file" id="fileInput" accept=".jsonl,.txt,application/json" style="display:none;">
+    <label>Domain:
+      <select id="domain">
+        <option value="all">All</option>
+        <option value="marginalised">marginalised</option>
+        <option value="power-critique">power-critique</option>
+      </select>
+    </label>
+    <label title="Show only rows with error explanations">
+      <input type="checkbox" id="errorsOnly"> Errors only
+    </label>
+  </div>
+</header>
+
+<main>
+  <div class="box">
+    <div class="meta">
+      <div><span class="k">ID:</span> <span id="m-id">—</span></div>
+      <div><span class="k">Domain:</span> <span id="m-domain">—</span></div>
+      <div><span class="k">Scores:</span>
+        <span id="m-acc">A:–</span>,
+        <span id="m-sti">S:–</span>,
+        <span id="m-wil">W:–</span>
+      </div>
+      <div class="muted" id="m-expl">—</div>
+    </div>
+    <div class="row">
+      <div class="box">
+        <div class="k">Prompt</div>
+        <pre id="prompt">—</pre>
+      </div>
+      <div class="box">
+        <div class="k">Response</div>
+        <pre id="response">—</pre>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  Tip: Use ← / → to navigate. If auto-load fails (local file restrictions), click “Load graded_responses.jsonl…”.
+</footer>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const state = { all: [], view: [], idx: 0 };
+
+  function escapeHtml(s){
+    if (s == null) return "";
+    return String(s)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+  }
+
+  function parseJSONL(text){
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const out = [];
+    for (const line of lines){
+      try { out.push(JSON.parse(line)); }
+      catch(e){ /* skip malformed */ }
+    }
+    return out;
+  }
+
+  function setData(arr, label){
+    state.all = arr;
+    state.idx = 0;
+    $("status").textContent = `${arr.length} items loaded${label ? " from " + label : ""}.`;
+    applyFilters();
+  }
+
+  function applyFilters(){
+    const dom = $("domain").value;
+    const errorsOnly = $("errorsOnly").checked;
+    state.view = state.all.filter(o=>{
+      const okD = dom === "all" ? true : (o.domain === dom);
+      const hasErr = (o.explanation || "").toString().includes("[ERROR]");
+      return okD && (errorsOnly ? hasErr : true);
+    });
+    if (state.idx >= state.view.length) state.idx = Math.max(0, state.view.length - 1);
+    render();
+  }
+
+  function render(){
+    const total = state.view.length;
+    $("pos").textContent = total ? `${state.idx+1} / ${total}` : "0 / 0";
+    const it = state.view[state.idx];
+    if (!it){
+      $("m-id").textContent = "—";
+      $("m-domain").textContent = "—";
+      $("m-acc").textContent = "A:–";
+      $("m-sti").textContent = "S:–";
+      $("m-wil").textContent = "W:–";
+      $("m-expl").textContent = "—";
+      $("prompt").textContent = "—";
+      $("response").textContent = "—";
+      $("prev").disabled = true; $("next").disabled = true;
+      return;
+    }
+    $("m-id").textContent = it.id ?? "—";
+    $("m-domain").textContent = it.domain ?? "—";
+    $("m-acc").textContent = `A:${it.accuracy ?? "–"}`;
+    $("m-sti").textContent = `S:${it.stigma ?? "–"}`;
+    $("m-wil").textContent = `W:${it.willingness ?? "–"}`;
+    $("m-expl").textContent = it.explanation ? `Note: ${escapeHtml(it.explanation)}` : " ";
+    $("prompt").textContent = it.prompt ?? it.input ?? "—";
+    $("response").textContent = it.response ?? "—";
+    $("prev").disabled = state.idx <= 0;
+    $("next").disabled = state.idx >= total - 1;
+  }
+
+  // Navigation
+  $("prev").onclick = ()=>{ if (state.idx>0) { state.idx--; render(); } };
+  $("next").onclick = ()=>{ if (state.idx < state.view.length-1) { state.idx++; render(); } };
+  window.addEventListener("keydown", e=>{
+    if (e.key === "ArrowLeft") $("prev").click();
+    if (e.key === "ArrowRight") $("next").click();
+  });
+
+  // Filters
+  $("domain").onchange = applyFilters;
+  $("errorsOnly").onchange = applyFilters;
+
+  // File picker
+  $("openFile").onclick = ()=> $("fileInput").click();
+  $("fileInput").addEventListener("change", async (ev)=>{
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setData(parseJSONL(text), file.name);
+  });
+
+  // Auto-load from same folder (may be blocked for file://)
+  (async ()=>{
+    try{
+      const resp = await fetch("graded_responses.jsonl", { cache:"no-store" });
+      if (!resp.ok) throw new Error("HTTP "+resp.status);
+      const text = await resp.text();
+      setData(parseJSONL(text), "graded_responses.jsonl");
+    } catch(err){
+      $("status").textContent = "Auto-load failed; use “Load graded_responses.jsonl…” to pick a file.";
+    }
+  })();
+})();
+</script>
+</body>
+</html>
