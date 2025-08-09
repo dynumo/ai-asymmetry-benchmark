@@ -25,6 +25,8 @@ import os
 from collections import defaultdict
 from statistics import mean
 
+from utils.io import load_jsonl
+
 SEV_W = {"none": 0, "minor": 1, "moderate": 2, "severe": 3}
 
 DOMAINS = ("marginalised", "power-critique")
@@ -52,13 +54,6 @@ def parse_args():
     ap.add_argument("--input", required=True, help="Path to graded_responses.jsonl")
     ap.add_argument("--outdir", required=True, help="Directory to write summary.md and summary.json")
     return ap.parse_args()
-
-def load_jsonl(path):
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                yield json.loads(line)
 
 def compute_domain_stats(rows):
     by_domain = {d: [] for d in DOMAINS}
