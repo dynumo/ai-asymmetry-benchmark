@@ -15,14 +15,14 @@ Env:
 Usage:
   python grader.py --prompts data/prompts.jsonl --rubric data/rubric.json \
     --model "openai:gpt-5-mini" --output results/<model>/<timestamp>/graded_responses.jsonl \
-    --max-retries 3 --sleep 0.5
+    --max-retries 3 --sleep 0.5 --concurrency 4
 """
 
 import argparse
+import asyncio
 import json
 import os
 import sys
-import time
 import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
@@ -76,6 +76,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-retries", type=int, default=3)
     p.add_argument(
         "--sleep", type=float, default=0.5, help="Base sleep between retries"
+    )
+    p.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Number of simultaneous grading requests",
     )
     return p.parse_args()
 
@@ -152,8 +158,13 @@ def call_model(model: str, prompt: str) -> str:
     return llm_client.ask(model, prompt)
 
 
-def grade_one(
-    model: str, rubric_text: str, item: Dict[str, Any], max_retries: int, sleep: float
+async def grade_one(
+    model: str,
+    rubric_text: str,
+    item: Dict[str, Any],
+    max_retries: int,
+    sleep: float,
+    semaphore: asyncio.Semaphore,
 ) -> Dict[str, Any]:
     base_prompt = build_prompt(rubric_text, item.get("prompt", ""))
 
@@ -162,7 +173,8 @@ def grade_one(
     while attempt <= max_retries:
         attempt += 1
         try:
-            content = call_model(model, base_prompt)
+            async with semaphore:
+                content = await asyncio.to_thread(call_model, model, base_prompt)
 
             candidates = []
             # If the model emitted prose, try to isolate the JSON block
@@ -192,15 +204,14 @@ def grade_one(
         except Exception as e:
             last_err = f"LLM call failed: {e}"
 
-        time.sleep(sleep * attempt)  # simple backoff
+        await asyncio.sleep(sleep * attempt)  # simple backoff
 
     raise RuntimeError(
         f"Failed to obtain valid JSON after {max_retries} retries. Last error: {last_err}"
     )
 
 
-def main():
-    args = parse_args()
+async def run(args: argparse.Namespace):
     rubric = load_rubric(args.rubric)
     ensure_outdir(args.output)
 
@@ -209,50 +220,67 @@ def main():
     ok_count = 0
     started = datetime.utcnow().isoformat() + "Z"
 
+    semaphore = asyncio.Semaphore(max(1, args.concurrency))
+
+    tasks = []
+    metadata = []
+    for item in load_jsonl(args.prompts):
+        total += 1
+        pid = item.get("id", str(uuid.uuid4()))
+        domain = (item.get("domain") or "").strip()
+        if domain not in ("marginalised", "power-critique"):
+            print(
+                f"[warn] prompt {pid}: unknown domain '{domain}', skipping",
+                file=sys.stderr,
+            )
+            continue
+
+        metadata.append((pid, domain, item))
+        tasks.append(
+            grade_one(
+                model=args.model,
+                rubric_text=rubric[domain],
+                item=item,
+                max_retries=args.max_retries,
+                sleep=args.sleep,
+                semaphore=semaphore,
+            )
+        )
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    records = []
+    for (pid, domain, item), res in zip(metadata, results):
+        if isinstance(res, Exception):
+            print(f"[error] prompt {pid}: {res}", file=sys.stderr)
+            continue
+
+        ok_count += 1
+        record = {
+            "id": pid,
+            "domain": domain,
+            "model": args.model,
+            "graded_at": datetime.utcnow().isoformat() + "Z",
+            "prompt": item.get("prompt", ""),
+            # pass through any extra prompt fields for later analysis
+            **{k: v for k, v in item.items() if k not in {"prompt", "domain", "id"}},
+            **res,
+        }
+        records.append(record)
+
     with open(out_tmp, "w", encoding="utf-8") as w:
-        for item in load_jsonl(args.prompts):
-            total += 1
-            pid = item.get("id", str(uuid.uuid4()))
-            domain = (item.get("domain") or "").strip()
-            if domain not in ("marginalised", "power-critique"):
-                print(
-                    f"[warn] prompt {pid}: unknown domain '{domain}', skipping",
-                    file=sys.stderr,
-                )
-                continue
-
-            try:
-                graded = grade_one(
-                    model=args.model,
-                    rubric_text=rubric[domain],
-                    item=item,
-                    max_retries=args.max_retries,
-                    sleep=args.sleep,
-                )
-                ok_count += 1
-                record = {
-                    "id": pid,
-                    "domain": domain,
-                    "model": args.model,
-                    "graded_at": datetime.utcnow().isoformat() + "Z",
-                    "prompt": item.get("prompt", ""),
-                    # pass through any extra prompt fields for later analysis
-                    **{
-                        k: v
-                        for k, v in item.items()
-                        if k not in {"prompt", "domain", "id"}
-                    },
-                    **graded,
-                }
-                w.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-            except Exception as e:
-                print(f"[error] prompt {pid}: {e}", file=sys.stderr)
+        for record in records:
+            w.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     os.replace(out_tmp, args.output)
     finished = datetime.utcnow().isoformat() + "Z"
     print(f"[done] Graded {ok_count}/{total} items. Output: {args.output}")
     print(f"[meta] started={started} finished={finished} model={args.model}")
+
+
+def main():
+    args = parse_args()
+    asyncio.run(run(args))
 
 
 if __name__ == "__main__":
