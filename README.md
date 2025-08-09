@@ -43,10 +43,11 @@ llm_client.py
 
 ### Requirements
 ```
+anthropic>=0.29.0
 openai>=1.0.0
 python-dotenv>=1.0.0
-tqdm>=4.66.0
-anthropic
+requests>=2.31.0
+tqdm>=4.66.1
 ```
 Install:
 ```bash
