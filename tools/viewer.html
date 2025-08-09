@@ -77,7 +77,7 @@
 </main>
 
 <footer>
-  Tip: Use ← / → to navigate. If auto-load fails (local file restrictions), click “Load graded_responses.jsonl…”.
+  Tip: Use ← / → to navigate. Select a file with “Load graded_responses.jsonl…”.
 </footer>
 
 <script>
@@ -89,17 +89,15 @@
     if (s == null) return "";
     return String(s)
       .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-      .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+      .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+      .replace(/'/g,"&#039;");
   }
 
   function parseJSONL(text){
-    const lines = text.split(/\r?\n/).filter(Boolean);
-    const out = [];
-    for (const line of lines){
-      try { out.push(JSON.parse(line)); }
-      catch(e){ /* skip malformed */ }
-    }
-    return out;
+    return text.split(/\r?\n/).filter(Boolean).map(line=>{
+      try { return JSON.parse(line); }
+      catch { return null; }
+    }).filter(Boolean);
   }
 
   function setData(arr, label){
@@ -114,7 +112,7 @@
     const errorsOnly = $("errorsOnly").checked;
     state.view = state.all.filter(o=>{
       const okD = dom === "all" ? true : (o.domain === dom);
-      const hasErr = (o.explanation || "").toString().includes("[ERROR]");
+      const hasErr = (o.explanation || "").includes("[ERROR]");
       return okD && (errorsOnly ? hasErr : true);
     });
     if (state.idx >= state.view.length) state.idx = Math.max(0, state.view.length - 1);
@@ -149,7 +147,6 @@
     $("next").disabled = state.idx >= total - 1;
   }
 
-  // Navigation
   $("prev").onclick = ()=>{ if (state.idx>0) { state.idx--; render(); } };
   $("next").onclick = ()=>{ if (state.idx < state.view.length-1) { state.idx++; render(); } };
   window.addEventListener("keydown", e=>{
@@ -157,11 +154,9 @@
     if (e.key === "ArrowRight") $("next").click();
   });
 
-  // Filters
   $("domain").onchange = applyFilters;
   $("errorsOnly").onchange = applyFilters;
 
-  // File picker
   $("openFile").onclick = ()=> $("fileInput").click();
   $("fileInput").addEventListener("change", async (ev)=>{
     const file = ev.target.files?.[0];
@@ -170,17 +165,7 @@
     setData(parseJSONL(text), file.name);
   });
 
-  // Auto-load from same folder (may be blocked for file://)
-  (async ()=>{
-    try{
-      const resp = await fetch("graded_responses.jsonl", { cache:"no-store" });
-      if (!resp.ok) throw new Error("HTTP "+resp.status);
-      const text = await resp.text();
-      setData(parseJSONL(text), "graded_responses.jsonl");
-    } catch(err){
-      $("status").textContent = "Auto-load failed; use “Load graded_responses.jsonl…” to pick a file.";
-    }
-  })();
+  $("status").textContent = "Please select a graded_responses.jsonl file to begin.";
 })();
 </script>
 </body>
