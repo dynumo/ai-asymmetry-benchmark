@@ -40,6 +40,45 @@ def ask(model_name: str, prompt: str) -> str:
         raise ValueError(f"Unknown provider: {provider}")
 
 # --------------------
+# HTTP retry helper
+# --------------------
+
+def _post_with_retries(
+    url: str,
+    *,
+    headers: dict | None = None,
+    json: dict | None = None,
+    timeout: int = 60,
+    retries: int = 3,
+    backoff_factor: float = 1.0,
+) -> requests.Response:
+    """
+    POST to ``url`` with retries and exponential backoff.
+
+    Raises RuntimeError with context if all retries fail.
+    """
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.post(url, headers=headers, json=json, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt == retries:
+                detail = f"{type(exc).__name__}: {exc}"
+                if getattr(exc, "response", None) is not None:
+                    r = exc.response
+                    detail += f" (status={r.status_code}, body={r.text[:200]})"
+                raise RuntimeError(
+                    f"POST {url} failed after {retries} attempts: {detail}"
+                ) from exc
+            sleep = backoff_factor * (2 ** (attempt - 1))
+            time.sleep(sleep)
+    # Should not reach here
+    raise RuntimeError(f"POST {url} failed: {last_exc}")
+
+# --------------------
 # Provider/model parsing
 # --------------------
 
@@ -74,15 +113,13 @@ def _parse_provider_and_model(s: str):
 # --------------------
 
 def _ask_openai(model: str, prompt: str) -> str:
-    import openai
     if not OPENAI_API_KEY:
         raise RuntimeError("Missing OPENAI_API_KEY")
-    openai.api_key = OPENAI_API_KEY
-    resp = openai.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return resp.choices[0].message.content.strip()
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+    payload = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+    r = _post_with_retries(url, headers=headers, json=payload, timeout=60)
+    return r.json()["choices"][0]["message"]["content"].strip()
 
 def _ask_anthropic(model: str, prompt: str) -> str:
     import anthropic
@@ -102,8 +139,7 @@ def _ask_groq(model: str, prompt: str) -> str:
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
     payload = {"model": model, "messages": [{"role": "user", "content": prompt}]}
-    r = requests.post(url, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
+    r = _post_with_retries(url, headers=headers, json=payload, timeout=60)
     return r.json()["choices"][0]["message"]["content"].strip()
 
 def _ask_novita(model: str, prompt: str) -> str:
@@ -127,8 +163,7 @@ def _ask_novita(model: str, prompt: str) -> str:
         "messages": [{"role": "user", "content": prompt}],
         "response_format": {"type": "text"},
     }
-    r = requests.post(url, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
+    r = _post_with_retries(url, headers=headers, json=payload, timeout=60)
     return r.json()["choices"][0]["message"]["content"].strip()
 
 def _ask_mistral(model: str, prompt: str) -> str:
@@ -137,6 +172,5 @@ def _ask_mistral(model: str, prompt: str) -> str:
     url = "https://api.mistral.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {MISTRAL_API_KEY}"}
     payload = {"model": model, "messages": [{"role": "user", "content": prompt}]}
-    r = requests.post(url, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
+    r = _post_with_retries(url, headers=headers, json=payload, timeout=60)
     return r.json()["choices"][0]["message"]["content"].strip()
