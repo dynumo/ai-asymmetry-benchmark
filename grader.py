@@ -27,6 +27,8 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 
+from utils.io import load_jsonl
+
 # Use the user's provider-agnostic client
 import llm_client  # relies on llm_client.ask(model, prompt) returning text  # noqa: F401
 
@@ -70,13 +72,6 @@ def parse_args() -> argparse.Namespace:
 
 def ensure_outdir(path: str):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-
-def load_jsonl(path: str):
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                yield json.loads(line)
 
 def load_rubric(path: str) -> Dict[str, str]:
     with open(path, "r", encoding="utf-8") as f:
