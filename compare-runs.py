@@ -28,6 +28,7 @@ from typing import List, Dict, Any, Tuple
 # Files / loading
 # ---------------------------------------------
 
+
 def find_summary_json(path: str) -> str:
     path = os.path.abspath(path)
     if os.path.isfile(path):
@@ -43,9 +44,11 @@ def find_summary_json(path: str) -> str:
     hits = glob(os.path.join(path, "**", "summary.json"), recursive=True)
     return hits[0] if hits else ""
 
+
 def load_summary(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
 
 def guess_model_from_path(run_dir: str) -> str:
     # Try to pick the parent-of-parent as "model" (…/<model>/<timestamp>/summary.json)
@@ -54,20 +57,32 @@ def guess_model_from_path(run_dir: str) -> str:
     # Prefer a folder name that looks like a model id
     for i in range(len(parts) - 1, 0, -1):
         name = parts[i]
-        if any(sep in name for sep in (":", "__", "-", "_")) or name.lower().startswith(("gpt", "claude", "deepseek", "openai", "novita")):
+        if any(sep in name for sep in (":", "__", "-", "_")) or name.lower().startswith(
+            ("gpt", "claude", "deepseek", "openai", "novita")
+        ):
             # If this is the timestamp folder, try its parent
             if name and any(c.isdigit() for c in name) and "_" in name:
-                return parts[i-1]
+                return parts[i - 1]
             return name
     # Fallback: last dir
     return parts[-2] if len(parts) >= 2 else parts[-1]
+
 
 # ---------------------------------------------
 # SVG helpers
 # ---------------------------------------------
 
-def svg_bar_chart(rows: List[Dict[str, Any]], key: str, title: str, signed: bool = False,
-                  width: int = 860, bar_h: int = 26, pad: int = 10, height: int = None) -> str:
+
+def svg_bar_chart(
+    rows: List[Dict[str, Any]],
+    key: str,
+    title: str,
+    signed: bool = False,
+    width: int = 860,
+    bar_h: int = 26,
+    pad: int = 10,
+    height: int = None,
+) -> str:
     """
     rows: list of dicts each with 'label' and metric key
     signed: if True, zero is centred; else zero is left edge
@@ -99,11 +114,17 @@ def svg_bar_chart(rows: List[Dict[str, Any]], key: str, title: str, signed: bool
 
     # Build bars
     svg_parts = []
-    svg_parts.append(f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="{title}">')
-    svg_parts.append(f'<text x="{left_margin}" y="24" font-size="16" font-weight="600">{escape_html(title)}</text>')
+    svg_parts.append(
+        f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="{title}">'
+    )
+    svg_parts.append(
+        f'<text x="{left_margin}" y="24" font-size="16" font-weight="600">{escape_html(title)}</text>'
+    )
 
     # Axis baseline (zero)
-    svg_parts.append(f'<line x1="{zero_x}" y1="{top-8}" x2="{zero_x}" y2="{height-10}" stroke="currentColor" stroke-opacity="0.2"/>')
+    svg_parts.append(
+        f'<line x1="{zero_x}" y1="{top-8}" x2="{zero_x}" y2="{height-10}" stroke="currentColor" stroke-opacity="0.2"/>'
+    )
 
     for i, r in enumerate(rows):
         y = top + i * (bar_h + pad)
@@ -120,21 +141,30 @@ def svg_bar_chart(rows: List[Dict[str, Any]], key: str, title: str, signed: bool
             w = max(0.0, x_val - x0)
 
         # Bar
-        svg_parts.append(f'<rect x="{x0:.2f}" y="{y}" width="{w:.2f}" height="{bar_h}" rx="5" ry="5" fill="currentColor" fill-opacity="0.15" />')
+        svg_parts.append(
+            f'<rect x="{x0:.2f}" y="{y}" width="{w:.2f}" height="{bar_h}" rx="5" ry="5" fill="currentColor" fill-opacity="0.15" />'
+        )
         # Value text
-        svg_parts.append(f'<text x="{x0 + w + 6:.2f}" y="{y + bar_h - 8}" font-size="12">{v:.3f}</text>')
+        svg_parts.append(
+            f'<text x="{x0 + w + 6:.2f}" y="{y + bar_h - 8}" font-size="12">{v:.3f}</text>'
+        )
         # Label
-        svg_parts.append(f'<text x="8" y="{y + bar_h - 6}" font-size="13">{escape_html(label)}</text>')
+        svg_parts.append(
+            f'<text x="8" y="{y + bar_h - 6}" font-size="13">{escape_html(label)}</text>'
+        )
 
     svg_parts.append("</svg>")
     return "\n".join(svg_parts)
 
+
 def escape_html(s: str) -> str:
-    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 # ---------------------------------------------
 # HTML report
 # ---------------------------------------------
+
 
 def build_html(rows: List[Dict[str, Any]]) -> str:
     # Sortings
@@ -142,17 +172,42 @@ def build_html(rows: List[Dict[str, Any]]) -> str:
     by_legacy = sorted(rows, key=lambda r: r["asymmetry_index"], reverse=True)
 
     # SVGs
-    svg1 = svg_bar_chart(by_adjusted, "adjusted_index", "Adjusted Index (directional, coverage-weighted)", signed=True,
-                         height=max(300, 60 + len(rows) * 34))
-    svg2 = svg_bar_chart(by_legacy, "asymmetry_index", "Legacy Asymmetry Index (mean of deltas)", signed=True,
-                         height=max(300, 60 + len(rows) * 34))
+    svg1 = svg_bar_chart(
+        by_adjusted,
+        "adjusted_index",
+        "Adjusted Index (directional, coverage-weighted)",
+        signed=True,
+        height=max(300, 60 + len(rows) * 34),
+    )
+    svg2 = svg_bar_chart(
+        by_legacy,
+        "asymmetry_index",
+        "Legacy Asymmetry Index (mean of deltas)",
+        signed=True,
+        height=max(300, 60 + len(rows) * 34),
+    )
     # For directional biases, we’ll show three stacked mini-charts for readability
-    svg3a = svg_bar_chart(by_adjusted, "will_bias", "Willingness bias ( + = more refusals on power )", signed=True,
-                          height=max(200, 60 + len(rows) * 28))
-    svg3b = svg_bar_chart(by_adjusted, "acc_bias", "Accuracy bias ( + = inaccuracies favour power )", signed=True,
-                          height=max(200, 60 + len(rows) * 28))
-    svg3c = svg_bar_chart(by_adjusted, "stigma_bias", "Stigma bias ( + = harms marginalised )", signed=True,
-                          height=max(200, 60 + len(rows) * 28))
+    svg3a = svg_bar_chart(
+        by_adjusted,
+        "will_bias",
+        "Willingness bias ( + = more refusals on power )",
+        signed=True,
+        height=max(200, 60 + len(rows) * 28),
+    )
+    svg3b = svg_bar_chart(
+        by_adjusted,
+        "acc_bias",
+        "Accuracy bias ( + = inaccuracies favour power )",
+        signed=True,
+        height=max(200, 60 + len(rows) * 28),
+    )
+    svg3c = svg_bar_chart(
+        by_adjusted,
+        "stigma_bias",
+        "Stigma bias ( + = harms marginalised )",
+        signed=True,
+        height=max(200, 60 + len(rows) * 28),
+    )
 
     # Table
     table_rows = []
@@ -273,9 +328,11 @@ def build_html(rows: List[Dict[str, Any]]) -> str:
 """
     return html
 
+
 # ---------------------------------------------
 # Row building
 # ---------------------------------------------
+
 
 def build_row(summary_path: str) -> Dict[str, Any]:
     s = load_summary(summary_path)
@@ -310,15 +367,23 @@ def build_row(summary_path: str) -> Dict[str, Any]:
     }
     return row
 
+
 # ---------------------------------------------
 # CLI
 # ---------------------------------------------
 
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Compare asymmetry benchmark runs.")
-    ap.add_argument("--inputs", nargs="+", required=True, help="Run directories or summary.json files")
+    ap.add_argument(
+        "--inputs",
+        nargs="+",
+        required=True,
+        help="Run directories or summary.json files",
+    )
     ap.add_argument("--out", required=True, help="Output HTML path")
     return ap.parse_args()
+
 
 def main():
     args = parse_args()
@@ -353,6 +418,7 @@ def main():
 
     print(f"[done] Wrote comparison report: {args.out}")
     print(f"[info] Compared {len(rows)} runs.")
+
 
 if __name__ == "__main__":
     main()

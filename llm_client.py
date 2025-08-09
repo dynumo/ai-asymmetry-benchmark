@@ -4,16 +4,17 @@ import requests
 import time
 import threading
 
-OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
-NOVITA_API_KEY    = os.getenv("NOVITA_API_KEY")
-MISTRAL_API_KEY   = os.getenv("MISTRAL_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+NOVITA_API_KEY = os.getenv("NOVITA_API_KEY")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 
 # ---- Novita rate limit (RPM: 10) ----
 _NOVITA_RPM = 10
 _novita_lock = threading.Lock()
 _novita_last_call = 0.0  # perf_counter seconds
+
 
 def ask(model_name: str, prompt: str) -> str:
     """
@@ -39,9 +40,11 @@ def ask(model_name: str, prompt: str) -> str:
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
+
 # --------------------
 # HTTP retry helper
 # --------------------
+
 
 def _post_with_retries(
     url: str,
@@ -78,9 +81,11 @@ def _post_with_retries(
     # Should not reach here
     raise RuntimeError(f"POST {url} failed: {last_exc}")
 
+
 # --------------------
 # Provider/model parsing
 # --------------------
+
 
 def _parse_provider_and_model(s: str):
     """
@@ -108,9 +113,11 @@ def _parse_provider_and_model(s: str):
     # Default to OpenAI if unknown
     return "openai", s
 
+
 # --------------------
 # Provider functions
 # --------------------
+
 
 def _ask_openai(model: str, prompt: str) -> str:
     if not OPENAI_API_KEY:
@@ -121,8 +128,10 @@ def _ask_openai(model: str, prompt: str) -> str:
     r = _post_with_retries(url, headers=headers, json=payload, timeout=60)
     return r.json()["choices"][0]["message"]["content"].strip()
 
+
 def _ask_anthropic(model: str, prompt: str) -> str:
     import anthropic
+
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("Missing ANTHROPIC_API_KEY")
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -133,6 +142,7 @@ def _ask_anthropic(model: str, prompt: str) -> str:
     # Anthropic returns content blocks
     return resp.content[0].text.strip() if resp.content else ""
 
+
 def _ask_groq(model: str, prompt: str) -> str:
     if not GROQ_API_KEY:
         raise RuntimeError("Missing GROQ_API_KEY")
@@ -141,6 +151,7 @@ def _ask_groq(model: str, prompt: str) -> str:
     payload = {"model": model, "messages": [{"role": "user", "content": prompt}]}
     r = _post_with_retries(url, headers=headers, json=payload, timeout=60)
     return r.json()["choices"][0]["message"]["content"].strip()
+
 
 def _ask_novita(model: str, prompt: str) -> str:
     if not NOVITA_API_KEY:
@@ -165,6 +176,7 @@ def _ask_novita(model: str, prompt: str) -> str:
     }
     r = _post_with_retries(url, headers=headers, json=payload, timeout=60)
     return r.json()["choices"][0]["message"]["content"].strip()
+
 
 def _ask_mistral(model: str, prompt: str) -> str:
     if not MISTRAL_API_KEY:
