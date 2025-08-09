@@ -2,20 +2,22 @@
 # -*- coding: utf-8 -*-
 
 """
-Grader: scores responses for marginalised vs power-critique prompts
-with direction-of-impact labels, using your llm_client.ask() wrapper.
+Grader: scores raw model responses with direction-of-impact labels.
 
 Inputs:
-  - prompts.jsonl  (each line: {"id": "...", "domain": "marginalised|power-critique", "prompt": "...", ...})
-  - rubric.json    (keys: "marginalised", "power-critique" with updated rubric text)
+  - raw_responses.jsonl (from benchmark.py)
+  - rubric.json         (contains text for each domain)
 
 Env:
   - Provider API keys as used by llm_client (e.g. OPENAI_API_KEY, NOVITA_API_KEY, etc.)
+  - GRADER_MODEL        (default grader model id)
 
 Usage:
-  python grader.py --prompts data/prompts.jsonl --rubric data/rubric.json \
-    --model "openai:gpt-5-mini" --output results/<model>/<timestamp>/graded_responses.jsonl \
-    --max-retries 3 --sleep 0.5 --concurrency 4
+  # grade all ungraded runs using default model & rubric
+  python grader.py
+
+  # or grade a specific run
+  python grader.py --input results/<model>/<timestamp>/raw_responses.jsonl
 """
 
 import argparse
@@ -25,9 +27,19 @@ import os
 import sys
 import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple
+from pathlib import Path
+from typing import Dict, Any, Optional, Tuple, Iterable
 
 from utils.io import load_jsonl
+
+# Optional .env loading for API keys
+try:
+    from dotenv import load_dotenv
+
+    if os.path.exists(".env"):
+        load_dotenv()
+except Exception:
+    pass
 
 # Use the user's provider-agnostic client
 import llm_client  # relies on llm_client.ask(model, prompt) returning text  # noqa: F401
@@ -61,18 +73,18 @@ JSON_NUDGE = "Return strict JSON only. No explanations. Ensure all required keys
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Grade prompts with direction-of-impact (provider-agnostic)."
+        description="Grade raw responses with direction-of-impact (provider-agnostic).",
     )
-    p.add_argument("--prompts", required=True, help="Path to prompts.jsonl")
-    p.add_argument("--rubric", required=True, help="Path to rubric.json")
+    p.add_argument(
+        "--input",
+        help="Path to raw_responses.jsonl; if omitted, grade all ungraded runs",
+    )
     p.add_argument(
         "--model",
-        required=True,
-        help="Model id (e.g., 'openai:gpt-5-mini' or 'novita:deepseek/deepseek-v3-0324')",
+        default=os.getenv("GRADER_MODEL", "").strip(),
+        help="Grader model id (e.g., 'openai:gpt-5-mini')",
     )
-    p.add_argument(
-        "--output", required=True, help="Where to write graded_responses.jsonl"
-    )
+    p.add_argument("--rubric", default="data/rubric.json", help="Path to rubric.json")
     p.add_argument("--max-retries", type=int, default=3)
     p.add_argument(
         "--sleep", type=float, default=0.5, help="Base sleep between retries"
@@ -88,6 +100,16 @@ def parse_args() -> argparse.Namespace:
 
 def ensure_outdir(path: str):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
+
+def find_ungraded_runs() -> Iterable[tuple[Path, Path]]:
+    base = Path("results")
+    if not base.exists():
+        return []
+    for raw in base.glob("*/*/raw_responses.jsonl"):
+        graded = raw.with_name("graded_responses.jsonl")
+        if not graded.exists():
+            yield raw, graded
 
 
 def load_rubric(path: str) -> Dict[str, str]:
@@ -143,12 +165,13 @@ def extract_json_maybe(text: str) -> Optional[str]:
     return None
 
 
-def build_prompt(rubric_text: str, user_prompt: str) -> str:
+def build_prompt(rubric_text: str, user_prompt: str, model_answer: str) -> str:
     # Single-string instruction suitable for llm_client.ask()
     return (
         f"{HEADER}\n\n"
         f"{rubric_text}\n\n"
         f"PROMPT:\n{user_prompt.strip()}\n\n"
+        f"ANSWER:\n{model_answer.strip()}\n\n"
         f"{JSON_NUDGE}"
     )
 
@@ -166,7 +189,9 @@ async def grade_one(
     sleep: float,
     semaphore: asyncio.Semaphore,
 ) -> Dict[str, Any]:
-    base_prompt = build_prompt(rubric_text, item.get("prompt", ""))
+    base_prompt = build_prompt(
+        rubric_text, item.get("prompt", ""), item.get("response", "")
+    )
 
     attempt = 0
     last_err = None
@@ -197,7 +222,11 @@ async def grade_one(
 
             # As a nudge, append a hard JSON reminder on retry.
             base_prompt = (
-                build_prompt(rubric_text, item.get("prompt", ""))
+                build_prompt(
+                    rubric_text,
+                    item.get("prompt", ""),
+                    item.get("response", ""),
+                )
                 + "\n\nReturn strict JSON."
             )
 
@@ -211,20 +240,26 @@ async def grade_one(
     )
 
 
-async def run(args: argparse.Namespace):
-    rubric = load_rubric(args.rubric)
-    ensure_outdir(args.output)
-
-    out_tmp = args.output + ".tmp"
+async def grade_file(
+    raw_path: Path,
+    graded_path: Path,
+    model: str,
+    rubric: Dict[str, str],
+    max_retries: int,
+    sleep: float,
+    concurrency: int,
+):
+    ensure_outdir(str(graded_path))
+    out_tmp = str(graded_path) + ".tmp"
     total = 0
     ok_count = 0
     started = datetime.utcnow().isoformat() + "Z"
 
-    semaphore = asyncio.Semaphore(max(1, args.concurrency))
+    semaphore = asyncio.Semaphore(max(1, concurrency))
 
     tasks = []
     metadata = []
-    for item in load_jsonl(args.prompts):
+    for item in load_jsonl(str(raw_path)):
         total += 1
         pid = item.get("id", str(uuid.uuid4()))
         domain = (item.get("domain") or "").strip()
@@ -238,11 +273,11 @@ async def run(args: argparse.Namespace):
         metadata.append((pid, domain, item))
         tasks.append(
             grade_one(
-                model=args.model,
+                model=model,
                 rubric_text=rubric[domain],
                 item=item,
-                max_retries=args.max_retries,
-                sleep=args.sleep,
+                max_retries=max_retries,
+                sleep=sleep,
                 semaphore=semaphore,
             )
         )
@@ -259,11 +294,12 @@ async def run(args: argparse.Namespace):
         record = {
             "id": pid,
             "domain": domain,
-            "model": args.model,
+            "model": model,
             "graded_at": datetime.utcnow().isoformat() + "Z",
             "prompt": item.get("prompt", ""),
+            "response": item.get("response", ""),
             # pass through any extra prompt fields for later analysis
-            **{k: v for k, v in item.items() if k not in {"prompt", "domain", "id"}},
+            **{k: v for k, v in item.items() if k not in {"prompt", "domain", "id", "response"}},
             **res,
         }
         records.append(record)
@@ -272,15 +308,39 @@ async def run(args: argparse.Namespace):
         for record in records:
             w.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    os.replace(out_tmp, args.output)
+    os.replace(out_tmp, graded_path)
     finished = datetime.utcnow().isoformat() + "Z"
-    print(f"[done] Graded {ok_count}/{total} items. Output: {args.output}")
-    print(f"[meta] started={started} finished={finished} model={args.model}")
+    print(f"[done] Graded {ok_count}/{total} items. Output: {graded_path}")
+    print(f"[meta] started={started} finished={finished} model={model}")
 
 
 def main():
     args = parse_args()
-    asyncio.run(run(args))
+    if not args.model:
+        raise EnvironmentError("Missing --model or GRADER_MODEL.")
+
+    rubric = load_rubric(args.rubric)
+
+    if args.input:
+        runs = [(Path(args.input), Path(args.input).with_name("graded_responses.jsonl"))]
+    else:
+        runs = list(find_ungraded_runs())
+        if not runs:
+            print("[done] No ungraded runs found.")
+            return
+
+    for raw_path, graded_path in runs:
+        asyncio.run(
+            grade_file(
+                raw_path,
+                graded_path,
+                args.model,
+                rubric,
+                args.max_retries,
+                args.sleep,
+                args.concurrency,
+            )
+        )
 
 
 if __name__ == "__main__":

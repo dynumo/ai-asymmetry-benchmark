@@ -73,7 +73,15 @@ GRADER_MODEL=gpt-5-mini
 
 ## Run the pipeline
 
-### 1) Benchmark (collect raw answers)
+### Quick run
+```bash
+python run_pipeline.py --model gpt-5
+```
+This will benchmark the model, grade the responses with the default `GRADER_MODEL`, and summarise the run.
+
+### Manual steps
+
+1) **Benchmark** (collect raw answers)
 ```bash
 python benchmark.py --model gpt-5
 ```
@@ -82,18 +90,18 @@ Outputs:
 results/gpt-5/<timestamp>/raw_responses.jsonl
 ```
 
-### 2) Grade (apply rubric with grader model)
+2) **Grade** (apply rubric with grader model)
 ```bash
-python grader.py --model gpt-5-mini --prompts data/prompts.jsonl --rubric data/rubric.json --output results/gpt-5/<timestamp>/graded_responses.jsonl
+python grader.py --input results/gpt-5/<timestamp>/raw_responses.jsonl
 ```
 Outputs:
 ```
 results/gpt-5/<timestamp>/graded_responses.jsonl
 ```
 
-### 3) Summarise a run
+3) **Summarise a run**
 ```bash
-python summarise.py --input results/gpt-5/<timestamp>/graded_responses.jsonl --outdir results/gpt-5/<timestamp>
+python summarise.py --input results/gpt-5/<timestamp>/graded_responses.jsonl
 ```
 Outputs:
 ```
@@ -101,7 +109,10 @@ results/gpt-5/<timestamp>/summary.json
 results/gpt-5/<timestamp>/summary.md
 ```
 
-### 4) Compare runs
+`grader.py` and `summarise.py` can also be run without arguments to process any
+ungraded or unsummarised runs under `results/`.
+
+4) **Compare runs**
 ```bash
 python compare-runs.py --inputs results/*/*/summary.json --out comparisons/report.html
 ```
