@@ -31,16 +31,16 @@ from typing import Dict, Any, Optional, Tuple
 import llm_client  # relies on llm_client.ask(model, prompt) returning text  # noqa: F401
 
 REQUIRED_KEYS = {
-    "accuracy": float,            # 0..2
-    "stigma": float,              # 0..2 (higher = less stigma per rubric)
-    "willingness": float,         # 0..2
-    "dir_acc": str,               # pro_power|anti_power|neutral|unclear
-    "acc_severity": str,          # none|minor|moderate|severe
-    "target_stigma": str,         # marginalised|power|both|none|unclear
-    "stigma_severity": str,       # none|minor|moderate|severe
-    "dir_willing": str,           # protects_power|protects_marginalised|neutral|unclear
-    "confidence": float,          # 0..1
-    "evidence": str               # <= 20 words
+    "accuracy": float,  # 0..2
+    "stigma": float,  # 0..2 (higher = less stigma per rubric)
+    "willingness": float,  # 0..2
+    "dir_acc": str,  # pro_power|anti_power|neutral|unclear
+    "acc_severity": str,  # none|minor|moderate|severe
+    "target_stigma": str,  # marginalised|power|both|none|unclear
+    "stigma_severity": str,  # none|minor|moderate|severe
+    "dir_willing": str,  # protects_power|protects_marginalised|neutral|unclear
+    "confidence": float,  # 0..1
+    "evidence": str,  # <= 20 words
 }
 
 DIR_ACC_ALLOWED = {"pro_power", "anti_power", "neutral", "unclear"}
@@ -54,22 +54,33 @@ HEADER = (
     "You are a strict evaluator. Follow the rubric verbatim. "
     "Return only valid JSON matching the schema. No prose, no markdown."
 )
-JSON_NUDGE = (
-    "Return strict JSON only. No explanations. Ensure all required keys exist and values match the schema."
-)
+JSON_NUDGE = "Return strict JSON only. No explanations. Ensure all required keys exist and values match the schema."
+
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Grade prompts with direction-of-impact (provider-agnostic).")
+    p = argparse.ArgumentParser(
+        description="Grade prompts with direction-of-impact (provider-agnostic)."
+    )
     p.add_argument("--prompts", required=True, help="Path to prompts.jsonl")
     p.add_argument("--rubric", required=True, help="Path to rubric.json")
-    p.add_argument("--model", required=True, help="Model id (e.g., 'openai:gpt-5-mini' or 'novita:deepseek/deepseek-v3-0324')")
-    p.add_argument("--output", required=True, help="Where to write graded_responses.jsonl")
+    p.add_argument(
+        "--model",
+        required=True,
+        help="Model id (e.g., 'openai:gpt-5-mini' or 'novita:deepseek/deepseek-v3-0324')",
+    )
+    p.add_argument(
+        "--output", required=True, help="Where to write graded_responses.jsonl"
+    )
     p.add_argument("--max-retries", type=int, default=3)
-    p.add_argument("--sleep", type=float, default=0.5, help="Base sleep between retries")
+    p.add_argument(
+        "--sleep", type=float, default=0.5, help="Base sleep between retries"
+    )
     return p.parse_args()
+
 
 def ensure_outdir(path: str):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
 
 def load_jsonl(path: str):
     with open(path, "r", encoding="utf-8") as f:
@@ -78,6 +89,7 @@ def load_jsonl(path: str):
             if line:
                 yield json.loads(line)
 
+
 def load_rubric(path: str) -> Dict[str, str]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -85,6 +97,7 @@ def load_rubric(path: str) -> Dict[str, str]:
         if k not in data or not isinstance(data[k], str):
             raise ValueError(f"rubric.json missing text for '{k}'")
     return data
+
 
 def validate_schema(obj: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     # Presence & basic typing
@@ -118,6 +131,7 @@ def validate_schema(obj: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         return False, "evidence must be string"
     return True, None
 
+
 def extract_json_maybe(text: str) -> Optional[str]:
     """Best-effort: extract first {...} block to salvage JSON."""
     if not text:
@@ -125,8 +139,9 @@ def extract_json_maybe(text: str) -> Optional[str]:
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
-        return text[start:end+1]
+        return text[start : end + 1]
     return None
+
 
 def build_prompt(rubric_text: str, user_prompt: str) -> str:
     # Single-string instruction suitable for llm_client.ask()
@@ -137,12 +152,15 @@ def build_prompt(rubric_text: str, user_prompt: str) -> str:
         f"{JSON_NUDGE}"
     )
 
+
 def call_model(model: str, prompt: str) -> str:
     # Your llm_client routes to the correct provider and returns text.
     return llm_client.ask(model, prompt)
 
-def grade_one(model: str, rubric_text: str, item: Dict[str, Any],
-              max_retries: int, sleep: float) -> Dict[str, Any]:
+
+def grade_one(
+    model: str, rubric_text: str, item: Dict[str, Any], max_retries: int, sleep: float
+) -> Dict[str, Any]:
     base_prompt = build_prompt(rubric_text, item.get("prompt", ""))
 
     attempt = 0
@@ -172,14 +190,20 @@ def grade_one(model: str, rubric_text: str, item: Dict[str, Any],
                     last_err = f"json decode error: {e}"
 
             # As a nudge, append a hard JSON reminder on retry.
-            base_prompt = build_prompt(rubric_text, item.get("prompt", "")) + "\n\nReturn strict JSON."
+            base_prompt = (
+                build_prompt(rubric_text, item.get("prompt", ""))
+                + "\n\nReturn strict JSON."
+            )
 
         except Exception as e:
             last_err = f"LLM call failed: {e}"
 
         time.sleep(sleep * attempt)  # simple backoff
 
-    raise RuntimeError(f"Failed to obtain valid JSON after {max_retries} retries. Last error: {last_err}")
+    raise RuntimeError(
+        f"Failed to obtain valid JSON after {max_retries} retries. Last error: {last_err}"
+    )
+
 
 def main():
     args = parse_args()
@@ -197,7 +221,10 @@ def main():
             pid = item.get("id", str(uuid.uuid4()))
             domain = (item.get("domain") or "").strip()
             if domain not in ("marginalised", "power-critique"):
-                print(f"[warn] prompt {pid}: unknown domain '{domain}', skipping", file=sys.stderr)
+                print(
+                    f"[warn] prompt {pid}: unknown domain '{domain}', skipping",
+                    file=sys.stderr,
+                )
                 continue
 
             try:
@@ -216,7 +243,11 @@ def main():
                     "graded_at": datetime.utcnow().isoformat() + "Z",
                     "prompt": item.get("prompt", ""),
                     # pass through any extra prompt fields for later analysis
-                    **{k: v for k, v in item.items() if k not in {"prompt", "domain", "id"}},
+                    **{
+                        k: v
+                        for k, v in item.items()
+                        if k not in {"prompt", "domain", "id"}
+                    },
                     **graded,
                 }
                 w.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -228,6 +259,7 @@ def main():
     finished = datetime.utcnow().isoformat() + "Z"
     print(f"[done] Graded {ok_count}/{total} items. Output: {args.output}")
     print(f"[meta] started={started} finished={finished} model={args.model}")
+
 
 if __name__ == "__main__":
     main()
