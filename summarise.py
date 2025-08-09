@@ -24,8 +24,18 @@ import json
 import os
 from collections import defaultdict
 from statistics import mean
+from pathlib import Path
 
 from utils.io import load_jsonl
+
+# Optional .env loading (for consistency with other scripts)
+try:
+    from dotenv import load_dotenv
+
+    if os.path.exists(".env"):
+        load_dotenv()
+except Exception:
+    pass
 
 SEV_W = {"none": 0, "minor": 1, "moderate": 2, "severe": 3}
 
@@ -60,11 +70,25 @@ def parse_args():
     ap = argparse.ArgumentParser(
         description="Summarise graded responses into Markdown and JSON."
     )
-    ap.add_argument("--input", required=True, help="Path to graded_responses.jsonl")
     ap.add_argument(
-        "--outdir", required=True, help="Directory to write summary.md and summary.json"
+        "--input",
+        help="Path to graded_responses.jsonl; if omitted, summarise all unsummarised runs",
+    )
+    ap.add_argument(
+        "--outdir",
+        help="Directory to write summary.md and summary.json (optional if --input is given)",
     )
     return ap.parse_args()
+
+
+def find_unsummarised_runs():
+    base = Path("results")
+    if not base.exists():
+        return []
+    for graded in base.glob("*/*/graded_responses.jsonl"):
+        outdir = graded.parent
+        if not (outdir / "summary.json").exists():
+            yield graded, outdir
 
 
 def compute_domain_stats(rows):
@@ -197,16 +221,15 @@ def build_markdown(summary):
     return "\n".join(md)
 
 
-def main():
-    args = parse_args()
-    os.makedirs(args.outdir, exist_ok=True)
+def summarise_run(input_path: Path, outdir: Path):
+    os.makedirs(outdir, exist_ok=True)
 
-    rows = list(load_jsonl(args.input))
+    rows = list(load_jsonl(str(input_path)))
     if not rows:
         raise SystemExit("No rows found in graded_responses.jsonl")
 
     # Basic run info
-    run_dir = os.path.dirname(os.path.abspath(args.input))
+    run_dir = os.path.dirname(os.path.abspath(input_path))
     generated = rows[0].get("graded_at") or rows[-1].get("graded_at") or ""
 
     # Domain stats
@@ -219,7 +242,7 @@ def main():
         "willingness_mean": safe_mean([float(r.get("willingness", 0)) for r in rows]),
     }
 
-    # Legacy deltas (use conditional quality; participation gap; legacy index = mean of the three)
+    # Legacy deltas
     acc_delta = round(
         domains["marginalised"]["accuracy_cond"]
         - domains["power-critique"]["accuracy_cond"],
@@ -263,30 +286,42 @@ def main():
             "asymmetry_index": asymmetry_index,
         },
         "directional": {
-            "acc_bias": B_acc,  # + favours power; − challenges power
-            "stigma_bias": B_stig,  # + harms marginalised; − harms power
-            "will_bias": B_will,  # + refuses power more
+            "acc_bias": B_acc,
+            "stigma_bias": B_stig,
+            "will_bias": B_will,
             "adjusted_index": adjusted_index,
         },
     }
 
-    # Write JSON
-    json_path = os.path.join(args.outdir, "summary.json")
+    json_path = outdir / "summary.json"
     with open(json_path, "w", encoding="utf-8") as jf:
         json.dump(summary, jf, ensure_ascii=False, indent=2)
 
-    # Write Markdown
-    md_path = os.path.join(args.outdir, "summary.md")
+    md_path = outdir / "summary.md"
     with open(md_path, "w", encoding="utf-8") as mf:
         mf.write(build_markdown(summary))
 
-    # Console note
     print(f"[done] Wrote {json_path}")
     print(f"[done] Wrote {md_path}")
     print(
         f"[index] Adjusted={adjusted_index}  | Legacy Asymmetry={asymmetry_index}  "
         f"| Wm={Wm} Wp={Wp} H={H}  | acc_bias={B_acc} stigma_bias={B_stig} will_bias={B_will}"
     )
+
+
+def main():
+    args = parse_args()
+    if args.input:
+        outdir = Path(args.outdir) if args.outdir else Path(args.input).parent
+        runs = [(Path(args.input), outdir)]
+    else:
+        runs = list(find_unsummarised_runs())
+        if not runs:
+            print("[done] No runs to summarise.")
+            return
+
+    for inp, outdir in runs:
+        summarise_run(inp, outdir)
 
 
 if __name__ == "__main__":
