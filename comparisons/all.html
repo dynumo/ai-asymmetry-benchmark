@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Asymmetry Benchmark – Comparison</title>
+
+<!-- Tailwind (Play CDN) -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['ui-sans-serif','system-ui','-apple-system','Segoe UI','Roboto','Ubuntu','Cantarell','Helvetica Neue','Arial','Noto Sans']
+        }
+      }
+    }
+  }
+</script>
+
+<!-- Chart.js (no SRI for easy local open) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+<style>
+  :root {
+    color-scheme: light dark;
+    --card-bg: #ffffff;
+    --fg: #0f172a;
+    --muted: #475569;
+    --grid: rgba(15,23,42,0.08);
+  }
+  .dark :root, .dark {
+    --card-bg: #0b1220;
+    --fg: #e5e7eb;
+    --muted: #9fb1c9;
+    --grid: rgba(226,232,240,0.12);
+  }
+</style>
+<script>
+  // Sync Tailwind dark class with user preference
+  const applyTheme = () => {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', prefersDark);
+  };
+  applyTheme();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+</script>
+</head>
+
+<body class="min-h-full bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+  <main class="max-w-7xl mx-auto px-5 py-6 sm:py-8">
+    <header class="mb-6 sm:mb-8">
+      <h1 class="text-3xl font-semibold tracking-tight">Asymmetry Benchmark – Comparison</h1>
+      <p class="mt-2 text-lg text-slate-700 dark:text-slate-300">
+        This viewer ranks AI models by the <strong>Adjusted Index</strong> (directional, coverage-weighted). Positive values
+        indicate behaviour that tends to favour marginalised groups or scrutinise power; negative values suggest the reverse.
+      </p>
+      <ul class="mt-4 flex flex-wrap gap-2 text-sm text-slate-700 dark:text-slate-300">
+        <li class="px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-white/5">Willingness bias: + = more refusals on power</li>
+        <li class="px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-white/5">Accuracy bias: + = inaccuracies favour power</li>
+        <li class="px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-white/5">Stigma bias: + = harms marginalised</li>
+      </ul>
+    </header>
+
+    <!-- Charts -->
+    <section class="space-y-8">
+      <article class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-[color:var(--card-bg)] p-6 shadow-sm">
+        <h2 class="text-xl font-semibold">Adjusted Index (primary ranking)</h2>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Combines directional bias with participation (coverage). Higher is better.</p>
+        <div class="mt-4 h-[380px]">
+          <canvas id="chartAdjusted" aria-label="Adjusted Index chart" role="img"></canvas>
+        </div>
+      </article>
+
+      <article class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-[color:var(--card-bg)] p-6 shadow-sm">
+        <h2 class="text-xl font-semibold">Delta Composite Index (mean of deltas)</h2>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Mean of participation, accuracy, and stigma deltas (marginalised − power). Zero bars still render faintly.</p>
+        <div class="mt-4 h-[380px]">
+          <canvas id="chartDelta" aria-label="Delta Composite Index chart" role="img"></canvas>
+        </div>
+      </article>
+
+      <article class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-[color:var(--card-bg)] p-6 shadow-sm">
+        <h2 class="text-xl font-semibold">Bias components</h2>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Breakdown of willingness, accuracy, and stigma effects (signed; 0 is neutral).</p>
+        <div class="mt-4 space-y-6">
+          <div class="h-[300px]">
+            <canvas id="chartWill" aria-label="Willingness bias chart" role="img"></canvas>
+          </div>
+          <div class="h-[300px]">
+            <canvas id="chartAcc" aria-label="Accuracy bias chart" role="img"></canvas>
+          </div>
+          <div class="h-[300px]">
+            <canvas id="chartStigma" aria-label="Stigma bias chart" role="img"></canvas>
+          </div>
+        </div>
+      </article>
+
+      <!-- League table -->
+      <article class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-[color:var(--card-bg)] p-6 shadow-sm">
+        <h2 class="text-xl font-semibold mb-2">Details (league table)</h2>
+        <p class="text-sm text-slate-600 dark:text-slate-300 mb-4">Ranked by Adjusted Index (best at the top). Values are rounded to 3 dp.</p>
+        <div class="overflow-x-auto">
+          <table class="w-full text-base" aria-describedby="table-desc">
+            <caption id="table-desc" class="sr-only">League table of models sorted by Adjusted Index</caption>
+            <thead class="text-left border-b border-slate-200 dark:border-slate-700">
+              <tr>
+                <th scope="col" class="py-3 pr-4">Rank</th>
+                <th scope="col" class="py-3 pr-4">Model</th>
+                <th scope="col" class="py-3 pr-4">Adjusted</th>
+                <th scope="col" class="py-3 pr-4">Delta (mean)</th>
+                <th scope="col" class="py-3 pr-4">Will&nbsp;bias</th>
+                <th scope="col" class="py-3 pr-4">Acc&nbsp;bias</th>
+                <th scope="col" class="py-3 pr-4">Stigma&nbsp;bias</th>
+                <th scope="col" class="py-3 pr-4">W<sub>m</sub></th>
+                <th scope="col" class="py-3 pr-4">W<sub>p</sub></th>
+                <th scope="col" class="py-3 pr-4">H</th>
+                <th scope="col" class="py-3 pr-4">ΔAcc</th>
+                <th scope="col" class="py-3 pr-4">ΔStigma</th>
+                <th scope="col" class="py-3 pr-4">ΔParticipation</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class='border-t border-slate-200 dark:border-slate-700 odd:bg-white/40 even:bg-white/20 dark:odd:bg-white/5 dark:even:bg-white/0'><td class='py-3 pr-4 align-top font-semibold'>🥇</td><td class='py-3 pr-4 align-top font-semibold whitespace-normal break-words'>openai / gpt-5-nano</td><td class='py-3 pr-4 align-top font-bold'>-0.200</td><td class='py-3 pr-4 align-top'>0.047</td><td class='py-3 pr-4 align-top'>0.000</td><td class='py-3 pr-4 align-top'>-0.180</td><td class='py-3 pr-4 align-top'>-0.020</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>1.000</td><td class='py-3 pr-4 align-top'>0.140</td><td class='py-3 pr-4 align-top'>0.000</td><td class='py-3 pr-4 align-top'>0.000</td></tr><tr class='border-t border-slate-200 dark:border-slate-700 odd:bg-white/40 even:bg-white/20 dark:odd:bg-white/5 dark:even:bg-white/0'><td class='py-3 pr-4 align-top font-semibold'>🥈</td><td class='py-3 pr-4 align-top font-semibold whitespace-normal break-words'>anthropic / claude-sonnet-4-20250514</td><td class='py-3 pr-4 align-top font-bold'>-0.440</td><td class='py-3 pr-4 align-top'>0.033</td><td class='py-3 pr-4 align-top'>0.000</td><td class='py-3 pr-4 align-top'>-0.360</td><td class='py-3 pr-4 align-top'>-0.080</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>1.000</td><td class='py-3 pr-4 align-top'>0.100</td><td class='py-3 pr-4 align-top'>0.000</td><td class='py-3 pr-4 align-top'>0.000</td></tr><tr class='border-t border-slate-200 dark:border-slate-700 odd:bg-white/40 even:bg-white/20 dark:odd:bg-white/5 dark:even:bg-white/0'><td class='py-3 pr-4 align-top font-semibold'>🥉</td><td class='py-3 pr-4 align-top font-semibold whitespace-normal break-words'>novita / zai-org / glm-4.5</td><td class='py-3 pr-4 align-top font-bold'>-0.450</td><td class='py-3 pr-4 align-top'>0.040</td><td class='py-3 pr-4 align-top'>0.000</td><td class='py-3 pr-4 align-top'>-0.350</td><td class='py-3 pr-4 align-top'>-0.100</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>1.000</td><td class='py-3 pr-4 align-top'>0.120</td><td class='py-3 pr-4 align-top'>0.000</td><td class='py-3 pr-4 align-top'>0.000</td></tr><tr class='border-t border-slate-200 dark:border-slate-700 odd:bg-white/40 even:bg-white/20 dark:odd:bg-white/5 dark:even:bg-white/0'><td class='py-3 pr-4 align-top font-semibold'>4</td><td class='py-3 pr-4 align-top font-semibold whitespace-normal break-words'>novita / deepseek / deepseek-v3-0324</td><td class='py-3 pr-4 align-top font-bold'>-0.554</td><td class='py-3 pr-4 align-top'>0.158</td><td class='py-3 pr-4 align-top'>0.020</td><td class='py-3 pr-4 align-top'>-0.470</td><td class='py-3 pr-4 align-top'>-0.110</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>1.960</td><td class='py-3 pr-4 align-top'>0.990</td><td class='py-3 pr-4 align-top'>0.453</td><td class='py-3 pr-4 align-top'>0.000</td><td class='py-3 pr-4 align-top'>0.020</td></tr><tr class='border-t border-slate-200 dark:border-slate-700 odd:bg-white/40 even:bg-white/20 dark:odd:bg-white/5 dark:even:bg-white/0'><td class='py-3 pr-4 align-top font-semibold'>5</td><td class='py-3 pr-4 align-top font-semibold whitespace-normal break-words'>novita / moonshotai / kimi-k2-instruct</td><td class='py-3 pr-4 align-top font-bold'>-0.670</td><td class='py-3 pr-4 align-top'>0.047</td><td class='py-3 pr-4 align-top'>0.000</td><td class='py-3 pr-4 align-top'>-0.590</td><td class='py-3 pr-4 align-top'>-0.080</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>1.000</td><td class='py-3 pr-4 align-top'>0.160</td><td class='py-3 pr-4 align-top'>-0.020</td><td class='py-3 pr-4 align-top'>0.000</td></tr><tr class='border-t border-slate-200 dark:border-slate-700 odd:bg-white/40 even:bg-white/20 dark:odd:bg-white/5 dark:even:bg-white/0'><td class='py-3 pr-4 align-top font-semibold'>6</td><td class='py-3 pr-4 align-top font-semibold whitespace-normal break-words'>novita / openai / gpt-oss-120b</td><td class='py-3 pr-4 align-top font-bold'>-0.770</td><td class='py-3 pr-4 align-top'>0.153</td><td class='py-3 pr-4 align-top'>-0.080</td><td class='py-3 pr-4 align-top'>-0.610</td><td class='py-3 pr-4 align-top'>-0.110</td><td class='py-3 pr-4 align-top'>1.840</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>0.958</td><td class='py-3 pr-4 align-top'>0.562</td><td class='py-3 pr-4 align-top'>-0.022</td><td class='py-3 pr-4 align-top'>-0.080</td></tr><tr class='border-t border-slate-200 dark:border-slate-700 odd:bg-white/40 even:bg-white/20 dark:odd:bg-white/5 dark:even:bg-white/0'><td class='py-3 pr-4 align-top font-semibold'>7</td><td class='py-3 pr-4 align-top font-semibold whitespace-normal break-words'>novita / openai / gpt-oss-20b</td><td class='py-3 pr-4 align-top font-bold'>-1.446</td><td class='py-3 pr-4 align-top'>0.162</td><td class='py-3 pr-4 align-top'>-0.020</td><td class='py-3 pr-4 align-top'>-1.280</td><td class='py-3 pr-4 align-top'>-0.160</td><td class='py-3 pr-4 align-top'>1.960</td><td class='py-3 pr-4 align-top'>2.000</td><td class='py-3 pr-4 align-top'>0.990</td><td class='py-3 pr-4 align-top'>0.471</td><td class='py-3 pr-4 align-top'>0.036</td><td class='py-3 pr-4 align-top'>-0.020</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-4 text-sm text-slate-600 dark:text-slate-300">H = harmonic mean of participation rates. Δ metrics use answered-only accuracy/stigma, and participation rate difference.</p>
+      </article>
+    </section>
+
+    <footer class="mt-10 pt-6 border-t border-slate-200 dark:border-slate-800 text-center text-sm text-slate-600 dark:text-slate-400">
+      <p>AI Asymmetry Benchmark – Made with <span aria-label="love" title="love">❤️</span> by Adam McBride.</p>
+      <p class="mt-1">
+        <a href="https://github.com/dynumo/ai-asymmetry-benchmark" class="text-cyan-400 hover:underline" target="_blank" rel="noopener">github.com/dynumo/ai-asymmetry-benchmark</a>
+      </p>
+    </footer>
+  </main>
+
+  <script>
+    const labels = ["openai / gpt-5-nano", "anthropic / claude-sonnet-4-20250514", "novita / zai-org / glm-4.5", "novita / deepseek / deepseek-v3-0324", "novita / moonshotai / kimi-k2-instruct", "novita / openai / gpt-oss-120b", "novita / openai / gpt-oss-20b"];
+    const dataAdjusted = [-0.2, -0.44, -0.45, -0.554, -0.67, -0.77, -1.446];
+    const dataDelta    = [0.047, 0.033, 0.04, 0.158, 0.047, 0.153, 0.162];
+    const dataWill     = [0.0, 0.0, 0.0, 0.02, 0.0, -0.08, -0.02];
+    const dataAcc      = [-0.18, -0.36, -0.35, -0.47, -0.59, -0.61, -1.28];
+    const dataStigma   = [-0.02, -0.08, -0.1, -0.11, -0.08, -0.11, -0.16];
+
+    // Fixed ranges per metric
+    const RANGE = {
+      adjusted: { min: -3, max:  3 },
+      delta:    { min: -2, max:  2 },
+      bias:     { min: -2, max:  2 },
+    };
+
+    // Neon cyan + glow
+    const NEON = '#00eaff';
+    const NEON_FAINT = 'rgba(0,234,255,0.25)'; // for zero bars
+    const GRID = getComputedStyle(document.documentElement).getPropertyValue('--grid').trim() || 'rgba(0,0,0,0.1)';
+    const TEXT = getComputedStyle(document.documentElement).getPropertyValue('--fg').trim() || '#0f172a';
+
+    // Plugin: glow + minimum width for zero values
+    const neonGlowPlugin = {
+      id: 'neonGlow',
+      afterDatasetsDraw(chart, args, pluginOptions) {
+        const { ctx, scales: { x, y } } = chart;
+        const ds = chart.data.datasets[0];
+        const meta = chart.getDatasetMeta(0);
+        if (!meta || !meta.data) return;
+
+        meta.data.forEach((elem, i) => {
+          const raw = ds.data[i] ?? 0;
+          const props = elem.getProps(['x','y','base','width','height'], true);
+          let xStart = Math.min(props.x, props.base);
+          let xEnd   = Math.max(props.x, props.base);
+          // Minimum thickness for zeros (8px)
+          if (Math.abs(raw) < 1e-12) {
+            const minPx = 8;
+            xStart = x.getPixelForValue(0) - (minPx/2);
+            xEnd   = x.getPixelForValue(0) + (minPx/2);
+          }
+          const barY = props.y - props.height/2;
+          const barW = Math.max(1, xEnd - xStart);
+          const barH = props.height;
+
+          ctx.save();
+          ctx.shadowColor = NEON;
+          ctx.shadowBlur = 18;
+          ctx.fillStyle = (Math.abs(raw) < 1e-12) ? NEON_FAINT : NEON;
+          ctx.fillRect(xStart, barY, barW, barH);
+          ctx.restore();
+        });
+      }
+    };
+
+    function makeHBar(id, title, values, minX, maxX) {
+      const ctx = document.getElementById(id);
+      if (!ctx || typeof window.Chart === 'undefined') return;
+
+      return new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: title,
+            data: values,
+            backgroundColor: 'rgba(0,0,0,0)', // fill handled by plugin
+            borderWidth: 0,
+            barPercentage: 0.8,
+            categoryPercentage: 0.9,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          plugins: {
+            legend: { display: false },
+            title: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.raw?.toFixed(3)}`
+              }
+            }
+          },
+          scales: {
+            x: {
+              min: minX, max: maxX,
+              grid: { color: GRID },
+              ticks: {
+                color: TEXT,
+                callback: (val) => Number(val).toFixed(1)
+              }
+            },
+            y: {
+              grid: { display: false },
+              ticks: { color: TEXT }
+            }
+          },
+          animation: false
+        },
+        plugins: [neonGlowPlugin]
+      });
+    }
+
+    const c1 = makeHBar('chartAdjusted', 'Adjusted Index', dataAdjusted, RANGE.adjusted.min, RANGE.adjusted.max);
+    const c2 = makeHBar('chartDelta',    'Delta Composite Index', dataDelta, RANGE.delta.min, RANGE.delta.max);
+    const c3 = makeHBar('chartWill',     'Willingness bias', dataWill, RANGE.bias.min, RANGE.bias.max);
+    const c4 = makeHBar('chartAcc',      'Accuracy bias',    dataAcc,  RANGE.bias.min, RANGE.bias.max);
+    const c5 = makeHBar('chartStigma',   'Stigma bias',      dataStigma, RANGE.bias.min, RANGE.bias.max);
+
+    // Re-render on theme change so colours stay legible
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      [c1,c2,c3,c4,c5].forEach(c => c && c.destroy());
+      makeHBar('chartAdjusted', 'Adjusted Index', dataAdjusted, RANGE.adjusted.min, RANGE.adjusted.max);
+      makeHBar('chartDelta',    'Delta Composite Index', dataDelta, RANGE.delta.min, RANGE.delta.max);
+      makeHBar('chartWill',     'Willingness bias', dataWill, RANGE.bias.min, RANGE.bias.max);
+      makeHBar('chartAcc',      'Accuracy bias',    dataAcc,  RANGE.bias.min, RANGE.bias.max);
+      makeHBar('chartStigma',   'Stigma bias',      dataStigma, RANGE.bias.min, RANGE.bias.max);
+    });
+  </script>
+</body>
+</html>

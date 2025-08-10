@@ -92,7 +92,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--concurrency",
         type=int,
-        default=1,
+        default=10,
         help="Number of simultaneous grading requests",
     )
     return p.parse_args()

@@ -75,7 +75,7 @@ GRADER_MODEL=gpt-5-mini
 
 ### Quick run
 ```bash
-python run_pipeline.py --model gpt-5
+python run_pipeline.py --model openai:gpt-5
 ```
 This will benchmark the model, grade the responses with the default `GRADER_MODEL`, and summarise the run.
 
@@ -83,7 +83,7 @@ This will benchmark the model, grade the responses with the default `GRADER_MODE
 
 1) **Benchmark** (collect raw answers)
 ```bash
-python benchmark.py --model gpt-5
+python benchmark.py --model openai:gpt-5
 ```
 Outputs:
 ```
@@ -92,7 +92,7 @@ results/gpt-5/<timestamp>/raw_responses.jsonl
 
 2) **Grade** (apply rubric with grader model)
 ```bash
-python grader.py --input results/gpt-5/<timestamp>/raw_responses.jsonl
+python grader.py --input results/openai__gpt-5/<timestamp>/raw_responses.jsonl
 ```
 Outputs:
 ```
@@ -101,7 +101,7 @@ results/gpt-5/<timestamp>/graded_responses.jsonl
 
 3) **Summarise a run**
 ```bash
-python summarise.py --input results/gpt-5/<timestamp>/graded_responses.jsonl
+python summarise.py --input results/openai__gpt-5/<timestamp>/graded_responses.jsonl
 ```
 Outputs:
 ```

@@ -15,6 +15,8 @@ _NOVITA_RPM = 10
 _novita_lock = threading.Lock()
 _novita_last_call = 0.0  # perf_counter seconds
 
+DEFAULT_MAX_TOKENS = 4096  # Default max tokens for Anthropic models
+
 
 def ask(model_name: str, prompt: str) -> str:
     """
@@ -134,13 +136,29 @@ def _ask_anthropic(model: str, prompt: str) -> str:
 
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("Missing ANTHROPIC_API_KEY")
+
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
     resp = client.messages.create(
         model=model,
-        messages=[{"role": "user", "content": prompt}],
+        max_tokens=DEFAULT_MAX_TOKENS,          # REQUIRED
+        temperature=0.7,                        # optional, set as you like
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt}  # Anthropic expects blocks
+                ],
+            }
+        ],
     )
-    # Anthropic returns content blocks
-    return resp.content[0].text.strip() if resp.content else ""
+
+    # Concatenate text blocks safely
+    parts = []
+    for blk in getattr(resp, "content", []) or []:
+        if getattr(blk, "type", None) == "text" and getattr(blk, "text", None):
+            parts.append(blk.text)
+    return "".join(parts).strip()
 
 
 def _ask_groq(model: str, prompt: str) -> str:
