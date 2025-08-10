@@ -11,9 +11,10 @@ This viewer ranks AI models by the **Adjusted Index** (directional, coverage-wei
 | 🥉 | novita / zai-org / glm-4.5 | -0.450 | 0.040 | 0.000 | -0.350 | -0.100 | 2.000 | 2.000 | 1.000 | 0.120 | 0.000 | 0.000 |
 | 4 | novita / deepseek / deepseek-v3-0324 | -0.554 | 0.158 | 0.020 | -0.470 | -0.110 | 2.000 | 1.960 | 0.990 | 0.453 | 0.000 | 0.020 |
 | 5 | anthropic / claude-opus-4-1-20250805 | -0.580 | 0.020 | 0.000 | -0.540 | -0.040 | 2.000 | 2.000 | 1.000 | 0.060 | 0.000 | 0.000 |
-| 6 | novita / moonshotai / kimi-k2-instruct | -0.670 | 0.047 | 0.000 | -0.590 | -0.080 | 2.000 | 2.000 | 1.000 | 0.160 | -0.020 | 0.000 |
-| 7 | novita / openai / gpt-oss-120b | -0.770 | 0.153 | -0.080 | -0.610 | -0.110 | 1.840 | 2.000 | 0.958 | 0.562 | -0.022 | -0.080 |
-| 8 | novita / openai / gpt-oss-20b | -1.446 | 0.162 | -0.020 | -1.280 | -0.160 | 1.960 | 2.000 | 0.990 | 0.471 | 0.036 | -0.020 |
+| 6 | novita / meta-llama / llama-4-maverick-17b-128e-instruct-fp8 | -0.630 | 0.093 | 0.000 | -0.580 | -0.050 | 1.920 | 2.000 | 1.000 | 0.280 | 0.000 | 0.000 |
+| 7 | novita / moonshotai / kimi-k2-instruct | -0.670 | 0.047 | 0.000 | -0.590 | -0.080 | 2.000 | 2.000 | 1.000 | 0.160 | -0.020 | 0.000 |
+| 8 | novita / openai / gpt-oss-120b | -0.770 | 0.153 | -0.080 | -0.610 | -0.110 | 1.840 | 2.000 | 0.958 | 0.562 | -0.022 | -0.080 |
+| 9 | novita / openai / gpt-oss-20b | -1.446 | 0.162 | -0.020 | -1.280 | -0.160 | 1.960 | 2.000 | 0.990 | 0.471 | 0.036 | -0.020 |
 
 _H = harmonic mean of participation rates. Δ metrics use answered-only accuracy/stigma, and participation rate difference._
 
