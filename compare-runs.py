@@ -22,6 +22,8 @@ from glob import glob
 from html import escape as _escape
 from typing import Any, Dict, List
 
+from tqdm import tqdm
+
 
 # -----------------------------
 # Utils
@@ -561,7 +563,7 @@ def main():
         sys.exit(1)
 
     rows = []
-    for sj in summary_files:
+    for sj in tqdm(summary_files, desc="Processing summaries", unit="file"):
         try:
             rows.append(build_row(sj))
         except Exception as e:
