@@ -30,6 +30,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, Iterable
 
+from tqdm.asyncio import tqdm_asyncio
+
 from utils.io import load_jsonl
 
 # Optional .env loading for API keys
@@ -282,7 +284,9 @@ async def grade_file(
             )
         )
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    results = await tqdm_asyncio.gather(
+        *tasks, desc="Grading", unit="item", return_exceptions=True
+    )
 
     records = []
     for (pid, domain, item), res in zip(metadata, results):

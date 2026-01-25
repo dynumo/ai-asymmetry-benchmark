@@ -26,6 +26,8 @@ from collections import defaultdict
 from statistics import mean
 from pathlib import Path
 
+from tqdm import tqdm
+
 from utils.io import load_jsonl
 
 # Optional .env loading (for consistency with other scripts)
@@ -101,14 +103,14 @@ def compute_domain_stats(rows):
     stats = {}
     for d, items in by_domain.items():
         n = len(items)
-        will_vals = [float(x.get("willingness", 0)) for x in items]
+        will_vals = [float(x.get("willingness", 0)) for x in tqdm(items, desc=f"Computing willingness stats for {d}", unit="item", leave=False)]
         answered = [x for x in items if float(x.get("willingness", 0)) > 0]
 
         # overall (for display), conditional (for fairness)
-        acc_all = [float(x.get("accuracy", 0)) for x in items]
-        sti_all = [float(x.get("stigma", 0)) for x in items]
-        acc_ans = [float(x.get("accuracy", 0)) for x in answered]
-        sti_ans = [float(x.get("stigma", 0)) for x in answered]
+        acc_all = [float(x.get("accuracy", 0)) for x in tqdm(items, desc=f"Computing accuracy stats for {d}", unit="item", leave=False)]
+        sti_all = [float(x.get("stigma", 0)) for x in tqdm(items, desc=f"Computing stigma stats for {d}", unit="item", leave=False)]
+        acc_ans = [float(x.get("accuracy", 0)) for x in tqdm(answered, desc=f"Computing conditional accuracy for {d}", unit="item", leave=False)]
+        sti_ans = [float(x.get("stigma", 0)) for x in tqdm(answered, desc=f"Computing conditional stigma for {d}", unit="item", leave=False)]
 
         participation_rate = round((len(answered) / n), 3) if n else 0.0
 
@@ -134,7 +136,7 @@ def compute_directional(rows):
     total_power = total_marg = 0
     refusals_power = refusals_marg = 0
 
-    for r in rows:
+    for r in tqdm(rows, desc="Computing directional biases", unit="item"):
         sev_a = SEV_W.get(str(r.get("acc_severity", "none")), 0)
         sev_s = SEV_W.get(str(r.get("stigma_severity", "none")), 0)
 
@@ -237,9 +239,9 @@ def summarise_run(input_path: Path, outdir: Path):
 
     # Overall (unconditional) means
     overall = {
-        "accuracy_mean": safe_mean([float(r.get("accuracy", 0)) for r in rows]),
-        "stigma_mean": safe_mean([float(r.get("stigma", 0)) for r in rows]),
-        "willingness_mean": safe_mean([float(r.get("willingness", 0)) for r in rows]),
+        "accuracy_mean": safe_mean([float(r.get("accuracy", 0)) for r in tqdm(rows, desc="Computing overall accuracy", unit="item", leave=False)]),
+        "stigma_mean": safe_mean([float(r.get("stigma", 0)) for r in tqdm(rows, desc="Computing overall stigma", unit="item", leave=False)]),
+        "willingness_mean": safe_mean([float(r.get("willingness", 0)) for r in tqdm(rows, desc="Computing overall willingness", unit="item", leave=False)]),
     }
 
     # Legacy deltas
